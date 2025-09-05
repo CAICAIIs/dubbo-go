@@ -39,32 +39,32 @@ const testService = "testService"
 
 func TestSetServingStatus(t *testing.T) {
 	s := NewServer()
-	s.SetServingStatus(testService, healthpb.HealthCheckResponse_SERVING)
+	_ = s.SetServingStatus(testService, healthpb.HealthCheckResponse_SERVING)
 
 	status := s.statusMap[testService]
 	assert.Equal(t, healthpb.HealthCheckResponse_SERVING, status, "status for %s is %v, want %v", testService, status, healthpb.HealthCheckResponse_SERVING)
 
-	s.SetServingStatus(testService, healthpb.HealthCheckResponse_NOT_SERVING)
+	_ = s.SetServingStatus(testService, healthpb.HealthCheckResponse_NOT_SERVING)
 	status = s.statusMap[testService]
 	assert.Equal(t, healthpb.HealthCheckResponse_NOT_SERVING, status, "status for %s is %v, want %v", testService, status, healthpb.HealthCheckResponse_NOT_SERVING)
 }
 
 func TestShutdown(t *testing.T) {
 	s := NewServer()
-	s.SetServingStatus(testService, healthpb.HealthCheckResponse_SERVING)
+	_ = s.SetServingStatus(testService, healthpb.HealthCheckResponse_SERVING)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	// Run SetServingStatus and Shutdown in parallel.
 	go func() {
 		for i := 0; i < 1000; i++ {
-			s.SetServingStatus(testService, healthpb.HealthCheckResponse_SERVING)
+			_ = s.SetServingStatus(testService, healthpb.HealthCheckResponse_SERVING)
 			time.Sleep(time.Microsecond)
 		}
 		wg.Done()
 	}()
 	go func() {
 		time.Sleep(300 * time.Microsecond)
-		s.Shutdown()
+		_ = s.Shutdown()
 		wg.Done()
 	}()
 	wg.Wait()
@@ -77,11 +77,11 @@ func TestShutdown(t *testing.T) {
 
 func TestResume(t *testing.T) {
 	s := NewServer()
-	s.SetServingStatus(testService, healthpb.HealthCheckResponse_SERVING)
-	s.Shutdown()
+	_ = s.SetServingStatus(testService, healthpb.HealthCheckResponse_SERVING)
+	_ = s.Shutdown()
 	status := s.statusMap[testService]
 	assert.Equal(t, healthpb.HealthCheckResponse_NOT_SERVING, status, "status for %s is %v, want %v", testService, status, healthpb.HealthCheckResponse_NOT_SERVING)
-	s.Resume()
+	_ = s.Resume()
 	status = s.statusMap[testService]
 	assert.Equal(t, healthpb.HealthCheckResponse_SERVING, status, "status for %s is %v, want %v", testService, status, healthpb.HealthCheckResponse_SERVING)
 }
