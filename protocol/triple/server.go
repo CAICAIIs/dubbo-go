@@ -32,8 +32,6 @@ import (
 
 	"github.com/dubbogo/gost/log/logger"
 
-	grpc_go "github.com/dubbogo/grpc-go"
-
 	"github.com/dustin/go-humanize"
 
 	"google.golang.org/grpc"
@@ -42,11 +40,9 @@ import (
 import (
 	"dubbo.apache.org/dubbo-go/v3/common"
 	"dubbo.apache.org/dubbo-go/v3/common/constant"
-	"dubbo.apache.org/dubbo-go/v3/config"
 	"dubbo.apache.org/dubbo-go/v3/global"
 	"dubbo.apache.org/dubbo-go/v3/internal"
 	"dubbo.apache.org/dubbo-go/v3/protocol/base"
-	"dubbo.apache.org/dubbo-go/v3/protocol/dubbo3"
 	"dubbo.apache.org/dubbo-go/v3/protocol/invocation"
 	tri "dubbo.apache.org/dubbo-go/v3/protocol/triple/triple_protocol"
 	dubbotls "dubbo.apache.org/dubbo-go/v3/tls"
@@ -127,35 +123,13 @@ func (s *Server) Start(invoker base.Invoker, info *common.ServiceInfo) {
 		logger.Infof("TRIPLE Server initialized the TLSConfig configuration")
 	}
 
-	// IDLMode means that this will only be set when
-	// the new triple is started in non-IDL mode.
-	// TODO: remove IDLMode when config package is removed
-	IDLMode := url.GetParam(constant.IDLMode, "")
-
-	var service common.RPCService
-	if IDLMode == constant.NONIDL {
-		service, _ = url.GetAttribute(constant.RpcServiceKey)
-	}
-
 	hanOpts := getHanOpts(url, tripleConf)
 
 	//Set expected codec name from serviceinfo
 	hanOpts = append(hanOpts, tri.WithExpectedCodecName(serialization))
 
 	intfName := url.Interface()
-	if info != nil {
-		// new triple idl mode
-		s.handleServiceWithInfo(intfName, invoker, info, hanOpts...)
-		s.saveServiceInfo(intfName, info)
-	} else if IDLMode == constant.NONIDL {
-		// new triple non-idl mode
-		reflectInfo := createServiceInfoWithReflection(service)
-		s.handleServiceWithInfo(intfName, invoker, reflectInfo, hanOpts...)
-		s.saveServiceInfo(intfName, reflectInfo)
-	} else {
-		// old triple idl mode and old triple non-idl mode
-		s.compatHandleService(intfName, url.Group(), url.Version(), hanOpts...)
-	}
+	s.registerServiceFromInfoOrURL(intfName, invoker, info, url, hanOpts...)
 	internal.ReflectionRegister(s)
 
 	go func() {
@@ -182,12 +156,7 @@ func (s *Server) RefreshService(invoker base.Invoker, info *common.ServiceInfo) 
 	//Set expected codec name from serviceinfo
 	hanOpts = append(hanOpts, tri.WithExpectedCodecName(serialization))
 	intfName := URL.Interface()
-	if info != nil {
-		s.handleServiceWithInfo(intfName, invoker, info, hanOpts...)
-		s.saveServiceInfo(intfName, info)
-	} else {
-		s.compatHandleService(intfName, URL.Group(), URL.Version(), hanOpts...)
-	}
+	s.registerServiceFromInfoOrURL(intfName, invoker, info, URL, hanOpts...)
 }
 
 func getHanOpts(url *common.URL, tripleConf *global.TripleConfig) (hanOpts []tri.HandlerOption) {
@@ -234,72 +203,6 @@ func getHanOpts(url *common.URL, tripleConf *global.TripleConfig) (hanOpts []tri
 	// todo:// open tracing
 
 	return hanOpts
-}
-
-// *Important*, this function is responsible for being compatible with old triple-gen code and non-idl code
-// compatHandleService registers handler based on ServiceConfig and provider service.
-func (s *Server) compatHandleService(interfaceName string, group, version string, opts ...tri.HandlerOption) {
-	providerServices := config.GetProviderConfig().Services
-	if len(providerServices) == 0 {
-		logger.Info("Provider service map is null, please register ProviderServices")
-		return
-	}
-	for key, providerService := range providerServices {
-		if providerService.Interface != interfaceName || providerService.Group != group || providerService.Version != version {
-			continue
-		}
-		// todo(DMwangnima): judge protocol type
-		service := config.GetProviderService(key)
-		serviceKey := common.ServiceKey(providerService.Interface, providerService.Group, providerService.Version)
-		exporter, _ := tripleProtocol.ExporterMap().Load(serviceKey)
-		if exporter == nil {
-			logger.Warnf("no exporter found for serviceKey: %v", serviceKey)
-			continue
-		}
-		invoker := exporter.(base.Exporter).GetInvoker()
-		if invoker == nil {
-			panic(fmt.Sprintf("no invoker found for servicekey: %v", serviceKey))
-		}
-		ds, ok := service.(dubbo3.Dubbo3GrpcService)
-		if !ok {
-			info := createServiceInfoWithReflection(service)
-			s.handleServiceWithInfo(interfaceName, invoker, info, opts...)
-			s.saveServiceInfo(interfaceName, info)
-			continue
-		}
-		s.compatSaveServiceInfo(ds.XXX_ServiceDesc())
-		// inject invoker, it has all invocation logics
-		ds.XXX_SetProxyImpl(invoker)
-		s.compatRegisterHandler(interfaceName, ds, opts...)
-	}
-}
-
-func (s *Server) compatRegisterHandler(interfaceName string, svc dubbo3.Dubbo3GrpcService, opts ...tri.HandlerOption) {
-	desc := svc.XXX_ServiceDesc()
-	// init unary handlers
-	for _, method := range desc.Methods {
-		// please refer to protocol/triple/internal/proto/triple_gen/greettriple for procedure examples
-		// error could be ignored because base is empty string
-		procedure := joinProcedure(interfaceName, method.MethodName)
-		_ = s.triServer.RegisterCompatUnaryHandler(procedure, method.MethodName, svc, tri.MethodHandler(method.Handler), opts...)
-	}
-
-	// init stream handlers
-	for _, stream := range desc.Streams {
-		// please refer to protocol/triple/internal/proto/triple_gen/greettriple for procedure examples
-		// error could be ignored because base is empty string
-		procedure := joinProcedure(interfaceName, stream.StreamName)
-		var typ tri.StreamType
-		switch {
-		case stream.ClientStreams && stream.ServerStreams:
-			typ = tri.StreamTypeBidi
-		case stream.ClientStreams:
-			typ = tri.StreamTypeClient
-		case stream.ServerStreams:
-			typ = tri.StreamTypeServer
-		}
-		_ = s.triServer.RegisterCompatStreamHandler(procedure, svc, typ, stream.Handler, opts...)
-	}
 }
 
 // handleServiceWithInfo injects invoker and create handler based on ServiceInfo
@@ -437,29 +340,39 @@ func (s *Server) saveServiceInfo(interfaceName string, info *common.ServiceInfo)
 	s.services[interfaceName] = ret
 }
 
-func (s *Server) compatSaveServiceInfo(desc *grpc_go.ServiceDesc) {
-	ret := grpc.ServiceInfo{}
-	ret.Methods = make([]grpc.MethodInfo, 0, len(desc.Streams)+len(desc.Methods))
-	for _, method := range desc.Methods {
-		md := grpc.MethodInfo{
-			Name:           method.MethodName,
-			IsClientStream: false,
-			IsServerStream: false,
-		}
-		ret.Methods = append(ret.Methods, md)
+// registerServiceFromInfoOrURL registers a service using a preferred IDL
+// description when available; otherwise it falls back to attempting to
+// derive the service from the URL (`RpcServiceKey`) and register via
+// reflection. If neither source is present the registration is skipped.
+func (s *Server) registerServiceFromInfoOrURL(interfaceName string, invoker base.Invoker, info *common.ServiceInfo, url *common.URL, opts ...tri.HandlerOption) {
+	// IDL mode: use provided generated ServiceInfo when available.
+	if info != nil {
+		logger.Infof("registering service %s with %d methods", interfaceName, len(info.Methods))
+		s.handleServiceWithInfo(interfaceName, invoker, info, opts...)
+		s.saveServiceInfo(interfaceName, info)
+		return
 	}
-	for _, stream := range desc.Streams {
-		md := grpc.MethodInfo{
-			Name:           stream.StreamName,
-			IsClientStream: stream.ClientStreams,
-			IsServerStream: stream.ServerStreams,
+
+	// non-IDL mode: attempt to obtain the runtime service instance from the
+	// URL attribute `RpcServiceKey` and build ServiceInfo via reflection.
+	if svcRaw, ok := url.GetAttribute(constant.RpcServiceKey); ok {
+		if svc, ok2 := svcRaw.(common.RPCService); ok2 {
+			reflectInfo := createServiceInfoWithReflection(svc)
+			if reflectInfo == nil {
+				logger.Warnf("attempted to register nil ServiceInfo (from reflection) for %s", interfaceName)
+				return
+			}
+			logger.Infof("registering service %s with %d methods (from reflection)", interfaceName, len(reflectInfo.Methods))
+			s.handleServiceWithInfo(interfaceName, invoker, reflectInfo, opts...)
+			s.saveServiceInfo(interfaceName, reflectInfo)
+		} else {
+			logger.Warnf("RpcServiceKey attribute present but not a common.RPCService for %s", interfaceName)
 		}
-		ret.Methods = append(ret.Methods, md)
+		return
 	}
-	ret.Metadata = desc.Metadata
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.services[desc.ServiceName] = ret
+
+	// Neither IDL info nor RpcServiceKey present: skip registration.
+	logger.Warnf("no ServiceInfo and no RpcServiceKey attribute for %s; skipping registration", interfaceName)
 }
 
 func (s *Server) GetServiceInfo() map[string]grpc.ServiceInfo {
