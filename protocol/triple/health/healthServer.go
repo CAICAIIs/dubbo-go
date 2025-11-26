@@ -19,14 +19,12 @@ package health
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
 import (
 	"github.com/dubbogo/gost/log/logger"
-
-	"github.com/dubbogo/grpc-go/codes"
-	"github.com/dubbogo/grpc-go/status"
 )
 
 import (
@@ -34,6 +32,7 @@ import (
 	"dubbo.apache.org/dubbo-go/v3/config"
 	"dubbo.apache.org/dubbo-go/v3/internal"
 	"dubbo.apache.org/dubbo-go/v3/protocol/triple/health/triple_health"
+	triple "dubbo.apache.org/dubbo-go/v3/protocol/triple/triple_protocol"
 	"dubbo.apache.org/dubbo-go/v3/server"
 )
 
@@ -68,7 +67,7 @@ func (srv *HealthTripleServer) Check(ctx context.Context, req *triple_health.Hea
 			Status: servingStatus,
 		}, nil
 	}
-	return nil, status.Error(codes.NotFound, "unknown service")
+	return nil, triple.NewError(triple.CodeNotFound, fmt.Errorf("unknown service"))
 }
 
 func (srv *HealthTripleServer) Watch(ctx context.Context, request *triple_health.HealthCheckRequest, server triple_health.Health_WatchServer) error {
@@ -106,11 +105,11 @@ func (srv *HealthTripleServer) Watch(ctx context.Context, request *triple_health
 			lastSentStatus = servingStatus
 			err := server.Send(&triple_health.HealthCheckResponse{Status: servingStatus})
 			if err != nil {
-				return status.Error(codes.Canceled, "Stream has ended.")
+				return triple.NewError(triple.CodeCanceled, fmt.Errorf("Stream has ended."))
 			}
 		// Context done. Removes the update channel from the updates map.
 		case <-ctx.Done():
-			return status.Error(codes.Canceled, "Stream has ended.")
+			return triple.NewError(triple.CodeCanceled, fmt.Errorf("Stream has ended."))
 		}
 	}
 }
