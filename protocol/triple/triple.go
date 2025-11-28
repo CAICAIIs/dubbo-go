@@ -104,10 +104,7 @@ func (tp *TripleProtocol) openServer(invoker base.Invoker, info *common.ServiceI
 
 // Refer a remote triple service
 func (tp *TripleProtocol) Refer(url *common.URL) base.Invoker {
-	var invoker base.Invoker
-	var err error
-	// use the new triple invoker for client-side references.
-	invoker, err = NewTripleInvoker(url)
+	invoker, err := NewTripleInvoker(url)
 	if err != nil {
 		logger.Warnf("can't dial the server: %s", url.Key())
 		return nil
