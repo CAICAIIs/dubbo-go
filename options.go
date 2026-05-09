@@ -87,6 +87,7 @@ func (rc *InstanceOptions) init(opts ...InstanceOption) error {
 	for _, opt := range opts {
 		opt(rc)
 	}
+	globalProtocols := rc.CloneProtocols()
 
 	// remaining procedure is like RootConfig.Init() without RootConfig.Start()
 	// tasks of RootConfig.Start() would be decomposed to Client and Server
@@ -167,6 +168,7 @@ func (rc *InstanceOptions) init(opts ...InstanceOption) error {
 	}
 
 	compatInstanceOptions(rcCompat, rc) // overrider options config because some config are changed after init
+	preserveGlobalOnlyProtocolConfig(globalProtocols, rc.Protocols)
 
 	return nil
 }

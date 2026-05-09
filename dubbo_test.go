@@ -30,6 +30,7 @@ import (
 import (
 	"dubbo.apache.org/dubbo-go/v3/client"
 	"dubbo.apache.org/dubbo-go/v3/common/constant"
+	"dubbo.apache.org/dubbo-go/v3/global"
 	"dubbo.apache.org/dubbo-go/v3/registry"
 	"dubbo.apache.org/dubbo-go/v3/server"
 )
@@ -113,6 +114,37 @@ func TestIndependentConfig(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func TestInstancePreservesHTTP3QUICConfigThroughInit(t *testing.T) {
+	ins, err := NewInstance(func(opts *InstanceOptions) {
+		opts.Protocols["tri"] = &global.ProtocolConfig{
+			Name: "tri",
+			Port: "20000",
+			TripleConfig: &global.TripleConfig{
+				Http3: &global.Http3Config{
+					Enable:                true,
+					Negotiation:           false,
+					KeepAlivePeriod:       "15s",
+					MaxIdleTimeout:        "45s",
+					MaxIncomingStreams:    128,
+					MaxIncomingUniStreams: 64,
+				},
+			},
+		}
+	})
+	require.NoError(t, err)
+
+	_, err = ins.NewServer(func(options *server.ServerOptions) {
+		http3 := options.Protocols["tri"].TripleConfig.Http3
+		assert.True(t, http3.Enable)
+		assert.False(t, http3.Negotiation)
+		assert.Equal(t, "15s", http3.KeepAlivePeriod)
+		assert.Equal(t, "45s", http3.MaxIdleTimeout)
+		assert.Equal(t, int64(128), http3.MaxIncomingStreams)
+		assert.Equal(t, int64(64), http3.MaxIncomingUniStreams)
+	})
+	require.NoError(t, err)
 }
 
 func TestSetProviderServiceRegistersByReference(t *testing.T) {

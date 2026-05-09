@@ -619,6 +619,32 @@ func compatInstanceOptions(cr *config.RootConfig, rc *InstanceOptions) {
 	rc.Profiles = compatGlobalProfilesConfig(cr.Profiles)
 }
 
+func preserveGlobalOnlyProtocolConfig(src, dst map[string]*global.ProtocolConfig) {
+	for id, srcProtocol := range src {
+		if srcProtocol == nil || srcProtocol.TripleConfig == nil || srcProtocol.TripleConfig.Http3 == nil {
+			continue
+		}
+
+		dstProtocol := dst[id]
+		if dstProtocol == nil {
+			continue
+		}
+		if dstProtocol.TripleConfig == nil {
+			dstProtocol.TripleConfig = &global.TripleConfig{}
+		}
+		if dstProtocol.TripleConfig.Http3 == nil {
+			dstProtocol.TripleConfig.Http3 = &global.Http3Config{}
+		}
+
+		srcHTTP3 := srcProtocol.TripleConfig.Http3
+		dstHTTP3 := dstProtocol.TripleConfig.Http3
+		dstHTTP3.KeepAlivePeriod = srcHTTP3.KeepAlivePeriod
+		dstHTTP3.MaxIdleTimeout = srcHTTP3.MaxIdleTimeout
+		dstHTTP3.MaxIncomingStreams = srcHTTP3.MaxIncomingStreams
+		dstHTTP3.MaxIncomingUniStreams = srcHTTP3.MaxIncomingUniStreams
+	}
+}
+
 func CompatGlobalProtocolConfig(c *config.ProtocolConfig) *global.ProtocolConfig {
 	if c == nil {
 		return nil
